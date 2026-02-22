@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-vrchat",
-  "description": "Search VRChat Avatars and Worlds",
-  "version": "0.0.2",
+  "description": "Search VRChat avatars, worlds, and users",
+  "version": "0.0.3",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -25,8 +25,8 @@
   },
   "koishi": {
     "description": {
-      "zh": "检索 VRChat 模型与世界",
-      "en": "Search VRChat Avatars and Worlds"
+      "zh": "检索 VRChat 模型、世界和玩家",
+      "en": "Search VRChat avatars, worlds, and users"
     },
     "browser": true
   }

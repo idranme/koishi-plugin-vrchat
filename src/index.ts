@@ -85,6 +85,11 @@ export function apply(ctx: Context, config: Config) {
         } catch { }
       }
 
+      if (avatarlist.length === 0) {
+        await session.bot.deleteMessage(session.channelId, msgId)
+        return '无检索结果'
+      }
+
       await session.send(`<message forward>${avatarlist.map(e =>
         `<message>模型名：
 ${e.name}
@@ -127,6 +132,11 @@ ${new Date(e.updated_at).toLocaleString()}<img src="${e.imageUrl}"></img></messa
         responseType: 'json'
       })
 
+      if (resp.length === 0) {
+        await session.bot.deleteMessage(session.channelId, msgId)
+        return '无检索结果'
+      }
+
       const messages: string[] = []
 
       for (const item of resp) {
@@ -158,7 +168,7 @@ ${item.favorites}
 ${new Date(item.created_at).toLocaleString()}
 
 最后更新时间：
-${new Date(item.updated_at).toLocaleString()}<img src="${item.imageUrl}"></img></message>`)
+${new Date(item.updated_at).toLocaleString()}<img src="${item.thumbnailImageUrl}"></img></message>`)
       }
 
       await session.send(`<message forward>${messages.join('')}</message>`)
@@ -182,6 +192,11 @@ ${new Date(item.updated_at).toLocaleString()}<img src="${item.imageUrl}"></img><
         responseType: 'json'
       })
 
+      if (resp.length === 0) {
+        await session.bot.deleteMessage(session.channelId, msgId)
+        return '无检索结果'
+      }
+
       const users: Dict[] = []
 
       for (const item of resp) {
@@ -199,15 +214,21 @@ ${new Date(item.updated_at).toLocaleString()}<img src="${item.imageUrl}"></img><
 
       for (const item of users) {
         let avatar = ''
+        let currentAvatarImageUrl = item.currentAvatarImageUrl
         if (item.currentAvatarImageUrl.startsWith('https://api.vrchat.cloud')) {
-          const resp = await ctx.http.get(item.currentAvatarImageUrl.slice(0, -7), {
-            headers: {
-              'User-Agent': 'VRCX 2026.02.11'
-            },
-            responseType: 'json'
-          })
-          avatar = resp.name.split(' - ')[1]
+          try {
+            const resp = await ctx.http.get(item.currentAvatarImageUrl.slice(0, -7), {
+              headers: {
+                'User-Agent': 'VRCX 2026.02.11'
+              },
+              responseType: 'json'
+            })
+            avatar = resp.name.split(' - ')[1]
+          } catch {
+            currentAvatarImageUrl = undefined
+          }
         }
+
         let location = item.location
         if (item.location.startsWith('wrld_')) {
           const resp = await ctx.http.get(`https://api.vrchat.cloud/api/1/worlds/${item.location.split(':')[0]}`, {
@@ -219,6 +240,9 @@ ${new Date(item.updated_at).toLocaleString()}<img src="${item.imageUrl}"></img><
           })
           location = resp.name
         }
+
+        let imgUrl = item.userIcon || currentAvatarImageUrl
+        const img = imgUrl ? `<img src="${imgUrl}"></img>` : ''
         messages.push(`<message>玩家名：
 ${item.displayName}
 
@@ -244,7 +268,7 @@ ${item.bio}
 ${item.bioLinks.join('\n')}
 
 账号创建日期：
-${item.date_joined}<img src="${item.userIcon || item.currentAvatarImageUrl}"></img></message>`)
+${item.date_joined}${img}</message>`)
       }
 
       await session.send(`<message forward>${messages.join('')}</message>`)
