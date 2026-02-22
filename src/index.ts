@@ -1,4 +1,4 @@
-import { Context, Schema, Binary } from 'koishi'
+import { Context, Schema, Binary, Dict } from 'koishi'
 
 export const name = 'vrchat'
 
@@ -159,6 +159,92 @@ ${new Date(item.created_at).toLocaleString()}
 
 最后更新时间：
 ${new Date(item.updated_at).toLocaleString()}<img src="${item.imageUrl}"></img></message>`)
+      }
+
+      await session.send(`<message forward>${messages.join('')}</message>`)
+
+      await session.bot.deleteMessage(session.channelId, msgId)
+    })
+
+  ctx.command('vrchat-users <keyword:text>', '检索 VRChat 玩家')
+    .option('number', '-n <value:number>', { fallback: 3 })
+    .action(async ({ session, options }, keyword) => {
+      if (!auth) return '请先登录'
+      if (!keyword) return '请输入关键词'
+
+      const [msgId] = await session.send('检索中…')
+
+      const resp = await ctx.http.get(`https://api.vrchat.cloud/api/1/users?n=${options.number}&offset=0&search=${encodeURIComponent(keyword)}&customFields=displayName&sort=relevance`, {
+        headers: {
+          'User-Agent': 'VRCX 2026.02.11',
+          'Cookie': auth
+        },
+        responseType: 'json'
+      })
+
+      const users: Dict[] = []
+
+      for (const item of resp) {
+        const resp = await ctx.http.get(`https://api.vrchat.cloud/api/1/users/${item.id}`, {
+          headers: {
+            'User-Agent': 'VRCX 2026.02.11',
+            'Cookie': auth
+          },
+          responseType: 'json'
+        })
+        users.push(resp)
+      }
+
+      const messages: string[] = []
+
+      for (const item of users) {
+        let avatar = ''
+        if (item.currentAvatarImageUrl.startsWith('https://api.vrchat.cloud')) {
+          const resp = await ctx.http.get(item.currentAvatarImageUrl.slice(0, -7), {
+            headers: {
+              'User-Agent': 'VRCX 2026.02.11'
+            },
+            responseType: 'json'
+          })
+          avatar = resp.name.split(' - ')[1]
+        }
+        let location = item.location
+        if (item.location.startsWith('wrld_')) {
+          const resp = await ctx.http.get(`https://api.vrchat.cloud/api/1/worlds/${item.location.split(':')[0]}`, {
+            headers: {
+              'User-Agent': 'VRCX 2026.02.11',
+              'Cookie': auth
+            },
+            responseType: 'json'
+          })
+          location = resp.name
+        }
+        messages.push(`<message>玩家名：
+${item.displayName}
+
+玩家 ID：
+${item.id}
+
+状态：
+${item.status} - ${item.statusDescription}
+
+当前位置：
+${location}
+
+正在使用的模型：
+${avatar}
+
+平台：
+${item.last_platform}
+
+简介：
+${item.bio}
+
+快捷链接：
+${item.bioLinks.join('\n')}
+
+账号创建日期：
+${item.date_joined}<img src="${item.userIcon || item.currentAvatarImageUrl}"></img></message>`)
       }
 
       await session.send(`<message forward>${messages.join('')}</message>`)
