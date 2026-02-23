@@ -293,7 +293,7 @@ ${location}
 ${avatar}
 
 平台：
-${item.last_platform}
+${item.platform}
 
 简介：
 ${item.bio}
