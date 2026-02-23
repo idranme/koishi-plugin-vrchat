@@ -1,16 +1,34 @@
 import { Context, Schema, Binary, Dict } from 'koishi'
+import { } from '@koishijs/cache'
+
+declare module '@koishijs/cache' {
+  interface Tables {
+    vrchat_auth: string
+  }
+}
 
 export const name = 'vrchat'
 
-export const inject = ['http']
+export const inject = ['http', 'cache']
 
 export interface Config { }
 
 export const Config: Schema<Config> = Schema.object({})
 
-export function apply(ctx: Context, config: Config) {
-  let auth: string | undefined
+function countryCodeToEmoji(code: string) {
+  if (!code || code.length !== 2) return ''
 
+  const A = 0x1F1E6; // 🇦
+  const offset = 'A'.charCodeAt(0)
+
+  const chars = code.toUpperCase().split('')
+  const first = A + (chars[0].charCodeAt(0) - offset)
+  const second = A + (chars[1].charCodeAt(0) - offset)
+
+  return String.fromCodePoint(first) + String.fromCodePoint(second)
+}
+
+export function apply(ctx: Context, config: Config) {
   ctx.command('vrchat-login', '登录 VRChat API')
     .action(async ({ session }) => {
       if (!session.isDirect) return '请通过私聊进行登录'
@@ -40,18 +58,21 @@ export function apply(ctx: Context, config: Config) {
         const code = await session.prompt()
         if (!code) return '输入超时。'
 
-        const cookie = authResp.headers.get('set-cookie').split('; ')[0]
+        const cookie = authResp.headers.get('set-cookie').split('; ')
         const emailOtpResp = await ctx.http.post('https://api.vrchat.cloud/api/1/auth/twofactorauth/emailotp/verify', { code }, {
           headers: {
             'User-Agent': 'VRCX 2026.02.11',
-            'Cookie': cookie
+            'Cookie': cookie[0]
           },
           responseType: 'json',
           validateStatus: status => status < 500
         })
         if (emailOtpResp.verified) {
-          auth = cookie
+          const expires = new Date(cookie[3].split('=')[1])
+          await ctx.cache.set('vrchat_auth', 'cookie', cookie[0], expires.getTime() - Date.now())
           return '登录成功'
+        } else if (emailOtpResp.error) {
+          return emailOtpResp.error.message
         }
       } else {
         ctx.logger.info(authResp)
@@ -61,6 +82,7 @@ export function apply(ctx: Context, config: Config) {
   ctx.command('vrchat-avatars <keyword:text>', '检索 VRChat 模型')
     .option('number', '-n <value:number>', { fallback: 10 })
     .action(async ({ session, options }, keyword) => {
+      const auth = await ctx.cache.get('vrchat_auth', 'cookie')
       if (!auth) return '请先登录'
       if (!keyword) return '请输入关键词'
 
@@ -119,6 +141,7 @@ ${new Date(e.updated_at).toLocaleString()}<img src="${e.imageUrl}"></img></messa
   ctx.command('vrchat-worlds <keyword:text>', '检索 VRChat 世界')
     .option('number', '-n <value:number>', { fallback: 10 })
     .action(async ({ session, options }, keyword) => {
+      const auth = await ctx.cache.get('vrchat_auth', 'cookie')
       if (!auth) return '请先登录'
       if (!keyword) return '请输入关键词'
 
@@ -179,6 +202,7 @@ ${new Date(item.updated_at).toLocaleString()}<img src="${item.thumbnailImageUrl}
   ctx.command('vrchat-users <keyword:text>', '检索 VRChat 玩家')
     .option('number', '-n <value:number>', { fallback: 3 })
     .action(async ({ session, options }, keyword) => {
+      const auth = await ctx.cache.get('vrchat_auth', 'cookie')
       if (!auth) return '请先登录'
       if (!keyword) return '请输入关键词'
 
@@ -231,15 +255,25 @@ ${new Date(item.updated_at).toLocaleString()}<img src="${item.thumbnailImageUrl}
 
         let location = item.location
         if (item.location.startsWith('wrld_')) {
-          const resp = await ctx.http.get(`https://api.vrchat.cloud/api/1/worlds/${item.location.split(':')[0]}`, {
+          const info = item.location.split(':')
+          const resp = await ctx.http.get(`https://api.vrchat.cloud/api/1/worlds/${info[0]}`, {
             headers: {
               'User-Agent': 'VRCX 2026.02.11',
               'Cookie': auth
             },
             responseType: 'json'
           })
-          location = resp.name
+          const ext = info[1].split('~')
+          location = `${resp.name} #${ext[0]} ${countryCodeToEmoji(ext.at(-1).match(/region\(([^)]+)\)/)[1])}`
         }
+
+        const statusLight = {
+          'active': '🟢',
+          'join me': '🔵',
+          'ask me': '🟠',
+          'busy': '🔴',
+          'offline': '⚪'
+        }[item.status]
 
         let imgUrl = item.userIcon || currentAvatarImageUrl
         const img = imgUrl ? `<img src="${imgUrl}"></img>` : ''
@@ -250,7 +284,7 @@ ${item.displayName}
 ${item.id}
 
 状态：
-${item.status} - ${item.statusDescription}
+${statusLight} ${item.status} - ${item.statusDescription}
 
 当前位置：
 ${location}
