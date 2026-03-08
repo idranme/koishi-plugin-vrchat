@@ -104,7 +104,9 @@ export function apply(ctx: Context, config: Config) {
             responseType: 'json'
           })
           avatarlist.push(resp)
-        } catch { }
+        } catch (e) {
+          if (e.response.status !== 404) throw e
+        }
       }
 
       if (avatarlist.length === 0) {
@@ -113,26 +115,7 @@ export function apply(ctx: Context, config: Config) {
       }
 
       await session.send(`<message forward>${avatarlist.map(e =>
-        `<message>模型名：
-${e.name}
-
-描述：
-${e.description}
-
-模型 ID：
-${e.id}
-
-作者名：
-${e.authorName}
-
-状态：
-${e.releaseStatus}
-
-创建时间：
-${new Date(e.created_at).toLocaleString()}
-
-最后更新时间：
-${new Date(e.updated_at).toLocaleString()}<img src="${e.imageUrl}"></img></message>`
+        `<message>${genAvatar(e)}</message>`
       ).join('')}</message>`)
 
       await session.bot.deleteMessage(session.channelId, msgId)
@@ -163,35 +146,7 @@ ${new Date(e.updated_at).toLocaleString()}<img src="${e.imageUrl}"></img></messa
       const messages: string[] = []
 
       for (const item of resp) {
-        let tags = []
-        for (const tag of item.tags) {
-          if (tag.startsWith('author_tag_')) {
-            tags.push(tag.replace('author_tag_', ''))
-          }
-        }
-        messages.push(`<message>世界名：
-${item.name}
-
-作者名：
-${item.authorName}
-
-地图内总在线人数：
-${item.occupants}
-
-世界 ID：
-${item.id}
-
-作者添加的标签：
-${tags.join(', ')}
-
-收藏人数：
-${item.favorites}
-
-创建时间：
-${new Date(item.created_at).toLocaleString()}
-
-最后更新时间：
-${new Date(item.updated_at).toLocaleString()}<img src="${item.thumbnailImageUrl}"></img></message>`)
+        messages.push(`<message>${genWorld(item)}</message>`)
       }
 
       await session.send(`<message forward>${messages.join('')}</message>`)
@@ -237,54 +192,156 @@ ${new Date(item.updated_at).toLocaleString()}<img src="${item.thumbnailImageUrl}
       const messages: string[] = []
 
       for (const item of users) {
-        let avatar = ''
-        let currentAvatarImageUrl = item.currentAvatarImageUrl
-        if (item.currentAvatarImageUrl.startsWith('https://api.vrchat.cloud')) {
-          try {
-            const resp = await ctx.http.get(item.currentAvatarImageUrl.slice(0, -7), {
-              headers: {
-                'User-Agent': 'VRCX 2026.02.11'
-              },
-              responseType: 'json'
-            })
-            avatar = resp.name.split(' - ')[1]
-          } catch {
-            currentAvatarImageUrl = undefined
-          }
-        }
+        messages.push(`<message>${await genUser(item, auth)}</message>`)
+      }
 
-        let location = item.location
-        if (item.location.startsWith('wrld_')) {
-          const info = item.location.split(':')
-          const resp = await ctx.http.get(`https://api.vrchat.cloud/api/1/worlds/${info[0]}`, {
-            headers: {
-              'User-Agent': 'VRCX 2026.02.11',
-              'Cookie': auth
-            },
-            responseType: 'json'
-          })
-          const ext = info[1].split('~')
-          location = `${resp.name} #${ext[0]} ${countryCodeToEmoji(ext.at(-1).match(/region\(([^)]+)\)/)[1])}`
-        }
+      await session.send(`<message forward>${messages.join('')}</message>`)
 
-        const statusLight = {
-          'active': '🟢',
-          'join me': '🔵',
-          'ask me': '🟠',
-          'busy': '🔴',
-          'offline': '⚪'
-        }[item.status]
+      await session.bot.deleteMessage(session.channelId, msgId)
+    })
 
-        let imgUrl = item.userIcon || currentAvatarImageUrl
-        const img = imgUrl ? `<img src="${imgUrl}"></img>` : ''
-        messages.push(`<message>玩家名：
-${item.displayName}
+  ctx.command('vrchat-direct <id:string>', '获取 VRChat 信息')
+    .action(async (_, keyword) => {
+      const auth = await ctx.cache.get('vrchat_auth', 'cookie')
+      if (!auth) return '请先登录'
+      if (!keyword) return '请输入 ID'
 
-玩家 ID：
-${item.id}
+      if (keyword.startsWith('avtr_')) {
+        const resp = await ctx.http.get(`https://api.vrchat.cloud/api/1/avatars/${keyword}`, {
+          headers: {
+            'User-Agent': 'VRCX 2026.02.11',
+            'Cookie': auth
+          },
+          responseType: 'json'
+        })
+        return genAvatar(resp)
+      } else if (keyword.startsWith('wrld_')) {
+        const resp = await ctx.http.get(`https://api.vrchat.cloud/api/1/worlds/${keyword}`, {
+          headers: {
+            'User-Agent': 'VRCX 2026.02.11',
+            'Cookie': auth
+          },
+          responseType: 'json'
+        })
+        return genWorld(resp)
+      } else if (keyword.startsWith('usr_')) {
+        const resp = await ctx.http.get(`https://api.vrchat.cloud/api/1/users/${keyword}`, {
+          headers: {
+            'User-Agent': 'VRCX 2026.02.11',
+            'Cookie': auth
+          },
+          responseType: 'json'
+        })
+        return await genUser(resp, auth)
+      } else {
+        return '不支持该类型 ID'
+      }
+    })
+
+  function genAvatar(info: Dict) {
+    return `模型名：
+${info.name}
+
+描述：
+${info.description}
+
+模型 ID：
+${info.id}
+
+作者名：
+${info.authorName}
 
 状态：
-${statusLight} ${item.status} - ${item.statusDescription}
+${info.releaseStatus}
+
+创建时间：
+${new Date(info.created_at).toLocaleString()}
+
+最后更新时间：
+${new Date(info.updated_at).toLocaleString()}<img src="${info.thumbnailImageUrl}"></img>`
+  }
+
+  function genWorld(info: Dict) {
+    const tags = []
+    for (const tag of info.tags) {
+      if (tag.startsWith('author_tag_')) {
+        tags.push(tag.replace('author_tag_', ''))
+      }
+    }
+    return `世界名：
+${info.name}
+
+作者名：
+${info.authorName}
+
+地图内总在线人数：
+${info.occupants}
+
+世界 ID：
+${info.id}
+
+作者添加的标签：
+${tags.join(', ')}
+
+收藏人数：
+${info.favorites}
+
+创建时间：
+${new Date(info.created_at).toLocaleString()}
+
+最后更新时间：
+${new Date(info.updated_at).toLocaleString()}<img src="${info.thumbnailImageUrl}"></img>`
+  }
+
+  async function genUser(info: Dict, auth: string) {
+    let avatar = ''
+    let currentAvatarImageUrl = info.currentAvatarImageUrl
+    if (info.currentAvatarImageUrl.startsWith('https://api.vrchat.cloud')) {
+      try {
+        const resp = await ctx.http.get(info.currentAvatarImageUrl.slice(0, -7), {
+          headers: {
+            'User-Agent': 'VRCX 2026.02.11'
+          },
+          responseType: 'json'
+        })
+        avatar = resp.name.split(' - ')[1]
+      } catch {
+        currentAvatarImageUrl = undefined
+      }
+    }
+
+    let location = info.location
+    if (info.location.startsWith('wrld_')) {
+      const locationInfo = info.location.split(':')
+      const resp = await ctx.http.get(`https://api.vrchat.cloud/api/1/worlds/${locationInfo[0]}`, {
+        headers: {
+          'User-Agent': 'VRCX 2026.02.11',
+          'Cookie': auth
+        },
+        responseType: 'json'
+      })
+      const ext = locationInfo[1].split('~')
+      location = `${resp.name} #${ext[0]} ${countryCodeToEmoji(ext.at(-1).match(/region\(([^)]+)\)/)[1])}`
+    }
+
+    const statusLight = {
+      'active': '🟢',
+      'join me': '🔵',
+      'ask me': '🟠',
+      'busy': '🔴',
+      'offline': '⚪'
+    }[info.status]
+
+    let imgUrl = info.userIcon || currentAvatarImageUrl
+    const img = imgUrl ? `<img src="${imgUrl}"></img>` : ''
+    return `玩家名：
+${info.displayName}
+
+玩家 ID：
+${info.id}
+
+状态：
+${statusLight} ${info.status} - ${info.statusDescription}
 
 当前位置：
 ${location}
@@ -293,20 +350,15 @@ ${location}
 ${avatar}
 
 平台：
-${item.platform}
+${info.platform}
 
 简介：
-${item.bio}
+${info.bio}
 
 快捷链接：
-${item.bioLinks.join('\n')}
+${info.bioLinks.join('\n')}
 
 账号创建日期：
-${item.date_joined}${img}</message>`)
-      }
-
-      await session.send(`<message forward>${messages.join('')}</message>`)
-
-      await session.bot.deleteMessage(session.channelId, msgId)
-    })
+${info.date_joined}${img}`
+  }
 }
