@@ -332,7 +332,7 @@ ${new Date(info.updated_at).toLocaleString()}<img src="${info.thumbnailImageUrl}
       'offline': '⚪'
     }[info.status]
 
-    let imgUrl = info.userIcon || currentAvatarImageUrl
+    let imgUrl = info.userIcon || info.profilePicOverride || currentAvatarImageUrl
     const img = imgUrl ? `<img src="${imgUrl}"></img>` : ''
     return `玩家名：
 ${info.displayName}
